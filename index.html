@@ -389,6 +389,8 @@
           this.camera = null;
           this.useFallback = false;
 
+          this.detectedGestures = { left: null, right: null };
+
           // Initialize MediaPipe hand detection
           this.initializeHandDetection();
 
@@ -535,15 +537,15 @@
               check: () => 0.8,
             },
             rock: {
-                name: "Rock",
-                text: "Rock On ",
-                check: () => 0.8,
-              },
-              three: {
-                name: "Three",
-                text: "Three ",
-                check: () => 0.8,
-              },
+              name: "Rock",
+              text: "Rock On ",
+              check: () => 0.8,
+            },
+            three: {
+              name: "Three",
+              text: "Three ",
+              check: () => 0.8,
+            },
           };
 
           this.updateModelStatus("Fallback Mode");
@@ -818,6 +820,35 @@
           container.insertBefore(instructionEl, container.firstChild);
         }
 
+        // onResults(results) {
+        //   if (!this.isRunning) return;
+
+        //   const startTime = performance.now();
+        //   this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
+        //   this.handsDetected = results.multiHandLandmarks?.length || 0;
+
+        //   if (this.handsDetected > 0) {
+        //     this.handLandmarks = results.multiHandLandmarks;
+
+        //     for (let i = 0; i < this.handLandmarks.length; i++) {
+        //       const landmarks = this.handLandmarks[i];
+
+        //       this.recognizeGestureForHand(i, landmarks); // ⬅️ New per-hand detection
+        //       this.drawHandLandmarks(landmarks, i); // ⬅️ Draw each hand
+        //     }
+        //   } else {
+        //     this.handLandmarks = null;
+        //     this.currentGesture = null;
+        //     this.gestureConfidence = 0;
+        //     this.gestureStabilityCounter = 0;
+        //   }
+
+        //   this.updateDetectionUI();
+
+        //   const processingTime = performance.now() - startTime;
+        //   this.updatePerformanceMetrics(processingTime);
+        // }
         onResults(results) {
           if (!this.isRunning) return;
 
@@ -825,21 +856,28 @@
           this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
           this.handsDetected = results.multiHandLandmarks?.length || 0;
+          this.detectedGestures = { left: null, right: null }; // ⬅️ Reset both hands
 
           if (this.handsDetected > 0) {
             this.handLandmarks = results.multiHandLandmarks;
+            this.currentHandedness = results.multiHandedness || [];
 
             for (let i = 0; i < this.handLandmarks.length; i++) {
               const landmarks = this.handLandmarks[i];
+              const handedness =
+                this.currentHandedness[i]?.label?.toLowerCase(); // 'left' or 'right'
 
-              this.recognizeGestureForHand(i, landmarks); // ⬅️ New per-hand detection
-              this.drawHandLandmarks(landmarks, i); // ⬅️ Draw each hand
+              const gesture = this.recognizeGestureForHand(i, landmarks); // returns gesture name or null
+
+              if (handedness === "left" || handedness === "right") {
+                this.detectedGestures[handedness] = gesture;
+              }
+
+              this.drawHandLandmarks(landmarks, i);
             }
           } else {
             this.handLandmarks = null;
-            this.currentGesture = null;
-            this.gestureConfidence = 0;
-            this.gestureStabilityCounter = 0;
+            this.detectedGestures = { left: null, right: null };
           }
 
           this.updateDetectionUI();
@@ -848,49 +886,72 @@
           this.updatePerformanceMetrics(processingTime);
         }
 
+        // recognizeGestureForHand(handIndex, landmarks) {
+        //   let detectedGesture = null;
+        //   let maxConfidence = 0;
+
+        //   for (const [gestureKey, pattern] of Object.entries(
+        //     this.gesturePatterns
+        //   )) {
+        //     const confidence = pattern.check(landmarks);
+        //     if (confidence > maxConfidence && confidence > 0.7) {
+        //       maxConfidence = confidence;
+        //       detectedGesture = gestureKey;
+        //     }
+        //   }
+
+        //   if (!this.handGestureData) this.handGestureData = {};
+        //   const prevGesture =
+        //     this.handGestureData[handIndex]?.lastGesture || null;
+        //   const stability = this.handGestureData[handIndex]?.stability || 0;
+
+        //   if (detectedGesture === prevGesture) {
+        //     this.handGestureData[handIndex].stability++;
+        //   } else {
+        //     this.handGestureData[handIndex] = {
+        //       lastGesture: detectedGesture,
+        //       stability: 1,
+        //     };
+        //   }
+
+        //   const stable =
+        //     this.handGestureData[handIndex].stability >=
+        //     this.minStabilityFrames;
+
+        //   if (
+        //     stable &&
+        //     detectedGesture &&
+        //     this.handGestureData[handIndex].lastAdded !== detectedGesture
+        //   ) {
+        //     this.addGestureToText(detectedGesture);
+        //     this.handGestureData[handIndex].lastAdded = detectedGesture;
+
+        //     setTimeout(() => {
+        //       this.handGestureData[handIndex].lastAdded = null;
+        //     }, 2000);
+        //   }
+        // }
         recognizeGestureForHand(handIndex, landmarks) {
-          let detectedGesture = null;
-          let maxConfidence = 0;
+          let bestMatch = null;
+          let bestConfidence = 0;
 
           for (const [gestureKey, pattern] of Object.entries(
             this.gesturePatterns
           )) {
             const confidence = pattern.check(landmarks);
-            if (confidence > maxConfidence && confidence > 0.7) {
-              maxConfidence = confidence;
-              detectedGesture = gestureKey;
+            if (confidence > bestConfidence) {
+              bestConfidence = confidence;
+              bestMatch = gestureKey;
             }
           }
 
-          if (!this.handGestureData) this.handGestureData = {};
-          const prevGesture =
-            this.handGestureData[handIndex]?.lastGesture || null;
-          const stability = this.handGestureData[handIndex]?.stability || 0;
-
-          if (detectedGesture === prevGesture) {
-            this.handGestureData[handIndex].stability++;
+          if (bestMatch && bestConfidence > 0.7) {
+            this.currentGesture = bestMatch;
+            this.gestureConfidence = bestConfidence;
+            this.gestureStabilityCounter++;
+            return bestMatch; // ⬅️ return gesture key (like "thumbsUp")
           } else {
-            this.handGestureData[handIndex] = {
-              lastGesture: detectedGesture,
-              stability: 1,
-            };
-          }
-
-          const stable =
-            this.handGestureData[handIndex].stability >=
-            this.minStabilityFrames;
-
-          if (
-            stable &&
-            detectedGesture &&
-            this.handGestureData[handIndex].lastAdded !== detectedGesture
-          ) {
-            this.addGestureToText(detectedGesture);
-            this.handGestureData[handIndex].lastAdded = detectedGesture;
-
-            setTimeout(() => {
-              this.handGestureData[handIndex].lastAdded = null;
-            }, 2000);
+            return null;
           }
         }
 
@@ -1275,7 +1336,6 @@
           }
         }
 
-        
         drawHandLandmarks(landmarks, handIndex) {
           this.ctx.fillStyle = "#00ff00";
           this.ctx.strokeStyle = "#00aa00";
@@ -1403,7 +1463,7 @@
           }
         }
 
-        updateDetectionUI() {
+        /*updateDetectionUI() {
           document.getElementById("handsDetected").textContent =
             this.handsDetected;
           document.getElementById("confidence").textContent = ` ${(
@@ -1419,6 +1479,44 @@
               "No gesture detected";
             this.clearGestureHighlight();
           }
+        }*/
+        updateDetectionUI() {
+          // Show how many hands are in view
+          document.getElementById("handsDetected").textContent =
+            this.handsDetected;
+
+          // Build an array of strings like "Left: Thumbs Up", "Right: No gesture"
+          const outputs = ["left", "right"].map((side) => {
+            const gestureKey = this.detectedGestures[side];
+            if (gestureKey && this.gesturePatterns[gestureKey]) {
+              const name = this.gesturePatterns[gestureKey].name;
+              return `${side.charAt(0).toUpperCase() + side.slice(1)}: ${name}`;
+            } else {
+              return `${
+                side.charAt(0).toUpperCase() + side.slice(1)
+              }: No gesture`;
+            }
+          });
+
+          // Display both in one element, separated by " | "
+          document.getElementById("gestureOutput").textContent =
+            outputs.join(" | ");
+
+          // Clear all highlights…
+          document.querySelectorAll(".gesture-item").forEach((item) => {
+            item.classList.remove("detected");
+          });
+
+          // …then highlight each detected gesture
+          ["left", "right"].forEach((side) => {
+            const gestureKey = this.detectedGestures[side];
+            if (gestureKey) {
+              const el = document.querySelector(
+                `[data-gesture="${gestureKey}"]`
+              );
+              if (el) el.classList.add("detected");
+            }
+          });
         }
 
         highlightGesture(gestureKey) {
